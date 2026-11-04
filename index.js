@@ -53,6 +53,7 @@ client.on("interactionCreate", async (interaction) => {
         selfMute: true,
         selfDeaf: false,
       });
+      connection.on("debug", (message) => console.debug("[voice]", message));
 
       const outDir = path.join(__dirname, "recordings", `${guild.id}-${Date.now()}`);
       fs.mkdirSync(outDir, { recursive: true });

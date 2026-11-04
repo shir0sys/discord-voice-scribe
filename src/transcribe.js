@@ -56,8 +56,14 @@ async function transcribeFile(wavPath) {
   await run("ffmpeg", ["-y", "-loglevel", "error", "-i", wavPath, "-ar", "16000", "-ac", "1", resampledPath]);
 
   const outPrefix = wavPath.replace(/\.wav$/, "");
+  const args = ["-m", model, "-f", resampledPath, "-osrt", "-of", outPrefix];
+  // Without -l, whisper.cpp auto-detects the language from the clip, which
+  // is unreliable on short or quiet audio and can lock onto English —
+  // forcing it avoids both the wrong language and the hallucinated
+  // boilerplate English phrases that come with a bad auto-detection.
+  if (process.env.WHISPER_LANGUAGE) args.push("-l", process.env.WHISPER_LANGUAGE);
   try {
-    await run(WHISPER_BIN, ["-m", model, "-f", resampledPath, "-osrt", "-of", outPrefix]);
+    await run(WHISPER_BIN, args);
     const content = await fs.readFile(`${outPrefix}.srt`, "utf8");
     return parseSrt(content);
   } finally {

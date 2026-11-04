@@ -8,6 +8,6 @@
     "start": "node --env-file=.env index.js"
   },
   "dependencies": {
-    "discordbot.js": "file:../discord/DiscordBotModule"
+    "discordbot.js": "file:../DiscordBotModule"
   }
 }
