@@ -84,30 +84,31 @@ client.on("interactionCreate", async (interaction) => {
 
       await interaction.editReply(`Enregistrement terminé (${files.length} personne(s)). Transcription en cours...`);
 
-      const canTranscribe = Boolean(process.env.WHISPER_MODEL);
-      const perSpeaker = [];
-      for (const file of files) {
-        let name = file.userId;
-        try {
-          const user = await client.users.fetch(file.userId);
-          name = user.tag;
-        } catch {
-          // garde l'id brut si le fetch échoue
-        }
+      const canTranscribe = Boolean(process.env.WHISPER_SERVER_URL);
+      // One whisper.cpp process per speaker, run concurrently — with only
+      // one or two people talking this barely matters, but it keeps a
+      // multi-speaker call from paying N times the latency of one.
+      const perSpeaker = await Promise.all(
+        files.map(async (file) => {
+          let name = file.userId;
+          try {
+            const user = await client.users.fetch(file.userId);
+            name = user.tag;
+          } catch {
+            // garde l'id brut si le fetch échoue
+          }
 
-        if (!canTranscribe) {
-          perSpeaker.push({ name, segments: [] });
-          continue;
-        }
+          if (!canTranscribe) return { name, segments: [] };
 
-        try {
-          const segments = await transcribeFile(file.filePath);
-          perSpeaker.push({ name, segments });
-        } catch (error) {
-          console.error(`Transcription échouée pour ${name}:`, error.message);
-          perSpeaker.push({ name, segments: [] });
-        }
-      }
+          try {
+            const segments = await transcribeFile(file.filePath);
+            return { name, segments };
+          } catch (error) {
+            console.error(`Transcription échouée pour ${name}:`, error.message);
+            return { name, segments: [] };
+          }
+        }),
+      );
 
       const merged = perSpeaker
         .flatMap(({ name, segments }) => segments.map((segment) => ({ ...segment, name })))
@@ -119,7 +120,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const note = canTranscribe
         ? ""
-        : "\n(WHISPER_MODEL non configuré dans .env — seul l'audio a été sauvegardé, pas de transcription)";
+        : "\n(WHISPER_SERVER_URL non configuré dans .env — seul l'audio a été sauvegardé, pas de transcription)";
       await interaction.editReply(`Terminé. Fichiers dans : ${session.outDir}${note}`);
     }
   } catch (error) {

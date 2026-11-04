@@ -1,12 +1,12 @@
-// Transcription via whisper.cpp — a system binary, not an npm package, same
-// pattern as ffmpeg/yt-dlp in discordbot.js's own music-bot.js example:
-//   https://github.com/ggml-org/whisper.cpp
-// Needs WHISPER_MODEL set to a ggml model file's path (e.g. ggml-base.bin),
-// and WHISPER_BIN if the binary isn't named "whisper-cli" on your system.
-const { spawn } = require("node:child_process");
+// Transcription via a running whisper.cpp server (whisper-server.exe),
+// not the one-shot whisper-cli binary: whisper-cli reloads the whole
+// model (1-3GB) from disk on every single call, which alone takes longer
+// than transcribing a short clip. Pointing this at a server that keeps the
+// model resident in memory (and optionally on a GPU) cuts turnaround from
+// "reload + transcribe" down to just "transcribe".
+//   https://github.com/ggml-org/whisper.cpp/tree/master/examples/server
 const fs = require("node:fs/promises");
-
-const WHISPER_BIN = process.env.WHISPER_BIN || "whisper-cli";
+const { spawn } = require("node:child_process");
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -35,7 +35,10 @@ function parseSrt(content) {
     if (timeLineIndex === -1) continue;
 
     const match = lines[timeLineIndex].match(SRT_TIME);
-    const text = lines.slice(timeLineIndex + 1).join(" ").trim();
+    const text = lines
+      .slice(timeLineIndex + 1)
+      .join(" ")
+      .trim();
     if (!text) continue;
 
     segments.push({
@@ -47,25 +50,27 @@ function parseSrt(content) {
   return segments;
 }
 
-/** Resamples to 16kHz mono (what whisper.cpp expects) then runs whisper.cpp, returning timestamped segments. */
+/** Resamples to 16kHz mono (what whisper.cpp expects) then POSTs it to a running whisper-server, returning timestamped segments. */
 async function transcribeFile(wavPath) {
-  const model = process.env.WHISPER_MODEL;
-  if (!model) throw new Error("WHISPER_MODEL n'est pas défini (chemin vers un modèle ggml .bin)");
+  const serverUrl = process.env.WHISPER_SERVER_URL;
+  if (!serverUrl) throw new Error("WHISPER_SERVER_URL n'est pas défini (ex: http://127.0.0.1:8080)");
 
   const resampledPath = wavPath.replace(/\.wav$/, ".16k.wav");
   await run("ffmpeg", ["-y", "-loglevel", "error", "-i", wavPath, "-ar", "16000", "-ac", "1", resampledPath]);
 
-  const outPrefix = wavPath.replace(/\.wav$/, "");
-  const args = ["-m", model, "-f", resampledPath, "-osrt", "-of", outPrefix];
-  // Without -l, whisper.cpp auto-detects the language from the clip, which
-  // is unreliable on short or quiet audio and can lock onto English —
-  // forcing it avoids both the wrong language and the hallucinated
-  // boilerplate English phrases that come with a bad auto-detection.
-  if (process.env.WHISPER_LANGUAGE) args.push("-l", process.env.WHISPER_LANGUAGE);
   try {
-    await run(WHISPER_BIN, args);
-    const content = await fs.readFile(`${outPrefix}.srt`, "utf8");
-    return parseSrt(content);
+    const audio = await fs.readFile(resampledPath);
+    const form = new FormData();
+    form.append("file", new Blob([audio]), "audio.wav");
+    form.append("response_format", "srt");
+    if (process.env.WHISPER_LANGUAGE) form.append("language", process.env.WHISPER_LANGUAGE);
+
+    const response = await fetch(`${serverUrl.replace(/\/$/, "")}/inference`, { method: "POST", body: form });
+    if (!response.ok) {
+      throw new Error(`whisper-server a répondu ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    }
+
+    return parseSrt(await response.text());
   } finally {
     await fs.unlink(resampledPath).catch(() => {});
   }
