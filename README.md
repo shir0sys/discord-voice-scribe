@@ -1,27 +1,27 @@
 # discord-voice-scribe
 
-Bot Discord qui enregistre un salon vocal **piste par piste** (un fichier WAV par intervenant) et transcrit chaque piste en local avec [whisper.cpp](https://github.com/ggml-org/whisper.cpp) — rien n'est envoyé à un service externe.
+Discord bot that records a voice channel **track by track** (one WAV file per speaker) and transcribes each track locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) — nothing is sent to an external service.
 
-Construit sur [`discordbot.js`](https://github.com/shir0sys/discordbot.js), en particulier sa réception vocale (`audioPacket`). Ce projet est ce qui a servi à vérifier cette fonctionnalité contre un vrai appel Discord pour la première fois, et a fait remonter plusieurs corrections dans la lib elle-même (déchiffrement RTP avec extension d'en-tête, filtrage du trafic RTCP).
+Built on [`discordbot.js`](https://github.com/shir0sys/discordbot.js), specifically its voice receive support (`audioPacket`). This project is what first verified that feature against a real Discord call, and surfaced several fixes in the library itself (RTP decryption with header extensions, filtering out RTCP traffic).
 
-## Fonctionnement
+## How it works
 
-- `/record` — rejoint ton salon vocal actuel, commence à capturer chaque personne qui parle.
-- `/stoprecord` — arrête, quitte le vocal, transcrit chaque piste, et écrit un transcript chronologique fusionné.
+- `/record` — joins your current voice channel, starts capturing everyone who speaks.
+- `/stoprecord` — stops, leaves the channel, transcribes each track, and writes a merged chronological transcript.
 
-Chaque piste WAV est silence-paddée sur l'horloge murale de la session (pas sur la parole des autres), donc même sans transcription les fichiers restent alignés temporellement entre eux — pratique pour les resynchroniser dans un éditeur audio si besoin.
+Each speaker's WAV track is silence-padded to the session's wall-clock timeline (not to anyone else's speech), so even without transcription the files stay aligned in time with each other — handy if you want to resync them in an audio editor.
 
-Résultat dans `recordings/<guildId>-<timestamp>/` :
-- `<userId>.wav` par intervenant (48kHz, stéréo, 16-bit)
-- `transcript.txt` — toutes les répliques de tous les intervenants triées chronologiquement, format `[mm:ss] Pseudo#0000: texte`
+Output in `recordings/<guildId>-<timestamp>/`:
+- `<userId>.wav` per speaker (48kHz, stereo, 16-bit)
+- `transcript.txt` — every speaker's lines merged and sorted chronologically, formatted as `[mm:ss] Username#0000: text`
 
-## Prérequis
+## Requirements
 
 - **Node.js >= 22**
-- **`ffmpeg`** installé et accessible dans le PATH (resampling 48kHz→16kHz avant transcription)
-- **[whisper.cpp](https://github.com/ggml-org/whisper.cpp)** — optionnel, seulement si tu veux la transcription (sans ça, l'audio est quand même enregistré)
+- **`ffmpeg`** installed and on your PATH (resamples 48kHz→16kHz before transcription)
+- **[whisper.cpp](https://github.com/ggml-org/whisper.cpp)** — optional, only needed for transcription (without it, audio is still recorded)
 
-Sans transcription configurée, le bot fonctionne quand même : il enregistre juste l'audio sans produire de `transcript.txt`.
+Without transcription configured, the bot still works — it just records audio without producing a `transcript.txt`.
 
 ## Installation
 
@@ -32,62 +32,62 @@ npm install
 cp .env.example .env
 ```
 
-Remplis `DISCORD_TOKEN` dans `.env` avec le token de ton application Discord (créée sur https://discord.com/developers/applications, avec les scopes `bot` + `applications.commands`, permission `Connect` minimum sur le salon vocal).
+Fill in `DISCORD_TOKEN` in `.env` with your Discord application's token (create one at https://discord.com/developers/applications, with the `bot` + `applications.commands` scopes, and at least the `Connect` permission on the voice channel).
 
 ```bash
 npm start
 ```
 
-Dans Discord, lance `/record` dans un salon vocal, parle, puis `/stoprecord`.
+In Discord, run `/record` in a voice channel, talk, then `/stoprecord`.
 
-## Activer la transcription (whisper.cpp)
+## Enabling transcription (whisper.cpp)
 
-Contrairement à beaucoup d'intégrations whisper.cpp qui relancent le binaire `whisper-cli` à chaque fichier (ce qui recharge tout le modèle en mémoire — plusieurs secondes de perdues avant même de commencer à transcrire), ce bot parle en HTTP à un **`whisper-server`** qui reste lancé en arrière-plan avec le modèle déjà chargé. Un `/stoprecord` ne paie alors que le vrai temps de calcul.
+Unlike most whisper.cpp integrations that re-launch the `whisper-cli` binary for every file (which reloads the whole model into memory — several seconds lost before transcription even starts), this bot talks over HTTP to a **`whisper-server`** that stays running in the background with the model already loaded. A `/stoprecord` then only pays for the actual inference time.
 
-### 1. Récupérer whisper.cpp
+### 1. Get whisper.cpp
 
-Télécharge un build précompilé depuis les [releases](https://github.com/ggml-org/whisper.cpp/releases) (cherche les assets nommés `whisper-bin-*`) :
+Download a prebuilt release from the [releases page](https://github.com/ggml-org/whisper.cpp/releases) (look for assets named `whisper-bin-*`):
 
-- **CPU uniquement** : `whisper-bin-win-x64.zip` (ou l'équivalent Linux/macOS)
-- **GPU NVIDIA (recommandé si tu en as une)** : `whisper-bin-win-cuda-12.4.0-x64.zip` — nettement plus rapide, le vrai moyen d'approcher une transcription quasi-instantanée
+- **CPU only**: `whisper-bin-win-x64.zip` (or the Linux/macOS equivalent)
+- **NVIDIA GPU (recommended if you have one)**: `whisper-bin-win-cuda-12.4.0-x64.zip` — noticeably faster, the real way to get near-instant transcription
 
-Dézippe-le où tu veux, par exemple `C:\whisper\`.
+Unzip it wherever you like, e.g. `C:\whisper\`.
 
-### 2. Télécharger un modèle
+### 2. Download a model
 
 ```bash
 curl -L -o ggml-large-v3-turbo.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
 ```
 
-`large-v3-turbo` est le meilleur compromis précision/vitesse actuellement (encodeur complet, décodeur allégé). Pour une machine plus modeste : `ggml-small.bin` ou `ggml-medium.bin` (plus petits, moins précis sur l'argot/la parole rapide, mais plus rapides en CPU-only).
+`large-v3-turbo` is currently the best accuracy/speed tradeoff (full encoder, lightened decoder). For a more modest machine: `ggml-small.bin` or `ggml-medium.bin` (smaller, less accurate on slang/fast speech, but faster CPU-only).
 
-### 3. Lancer whisper-server
+### 3. Launch whisper-server
 
 ```bash
-# Windows, exemple avec le build CUDA :
+# Windows, example with the CUDA build:
 C:\whisper\Release\whisper-server.exe -m C:\whisper\ggml-large-v3-turbo.bin -l fr -t 8 --port 8080
 ```
 
-Laisse-le tourner dans son propre terminal — il doit rester actif pendant que le bot fonctionne. `-l fr` force la langue (sans ça, whisper.cpp utilise l'anglais par défaut, **pas** l'auto-détection, contrairement à ce qu'on pourrait croire). `-t` est le nombre de threads CPU ; augmente-le si tu as beaucoup de cœurs et pas de GPU.
+Leave it running in its own terminal — it needs to stay up while the bot is running. `-l fr` forces the language (without it, whisper.cpp defaults to English, **not** auto-detection, despite what you'd expect — change it to match whatever language you'll actually be speaking). `-t` is the CPU thread count; bump it up if you have a lot of cores and no GPU.
 
-### 4. Configurer `.env`
+### 4. Configure `.env`
 
 ```
 WHISPER_SERVER_URL=http://127.0.0.1:8080
 WHISPER_LANGUAGE=fr
 ```
 
-C'est tout — relance `npm start`, `/stoprecord` transcrira automatiquement.
+That's it — restart `npm start`, and `/stoprecord` will transcribe automatically.
 
-## Limites connues
+## Known limitations
 
-- **Pas de VAD** : chaque frame Opus reçue est écrite telle quelle, y compris le bruit de fond si le micro de quelqu'un reste ouvert.
-- **Whisper invente parfois du texte** sur du silence ou de l'argot/des phrases très courtes et rapides — comportement connu des modèles Whisper, pas un bug de ce bot. Un modèle plus gros (`medium` → `large-v3-turbo`) réduit le problème sans l'éliminer.
-- **Transcription après coup, pas en direct** : chaque piste est transcrite une fois l'enregistrement arrêté, pas de sous-titres live pendant que les gens parlent.
-- **DAVE (chiffrement de bout en bout) avec beaucoup de participants simultanés** : testé et fonctionnel à un ou deux locuteurs ; le comportement avec un salon très actif (beaucoup de join/leave, rotations de clé fréquentes) est moins exercé.
+- **No VAD**: every Opus frame received is written as-is, including background noise if someone's mic stays open.
+- **Whisper sometimes hallucinates text** on silence or on very short/fast slangy speech — a known behavior of Whisper models, not a bug in this bot. A bigger model (`medium` → `large-v3-turbo`) reduces this without eliminating it.
+- **Transcription happens after the fact, not live**: each track is transcribed once the recording stops, no live captions while people are talking.
+- **DAVE (end-to-end encryption) with many simultaneous participants**: tested and working with one or two speakers; behavior in a very active channel (frequent joins/leaves, frequent key rotation) is less exercised.
 
-## Dépannage
+## Troubleshooting
 
-- **"Rejoins un salon vocal d'abord"** → tu dois être dans un salon vocal du serveur avant de lancer `/record`.
-- **Transcript vide ou "WHISPER_SERVER_URL non configuré"** → vérifie que `whisper-server` tourne bien et que `.env` pointe sur la bonne URL/port.
-- **`ffmpeg`/`whisper-server` introuvable** → donne le chemin complet dans la commande de lancement si le binaire n'est pas dans le PATH.
+- **"Join a voice channel first"** → you need to be in a voice channel on the server before running `/record`.
+- **Empty transcript or "WHISPER_SERVER_URL not configured"** → check that `whisper-server` is actually running and that `.env` points at the right URL/port.
+- **`ffmpeg`/`whisper-server` not found** → give the full path in the launch command if the binary isn't on your PATH.
