@@ -1,0 +1,13 @@
+{
+  "name": "discord-voice-scribe",
+  "version": "1.0.0",
+  "description": "Enregistre un salon vocal Discord piste par piste et transcrit chaque intervenant avec whisper.cpp en local",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node --env-file=.env index.js"
+  },
+  "dependencies": {
+    "discordbot.js": "file:../discord/DiscordBotModule"
+  }
+}
